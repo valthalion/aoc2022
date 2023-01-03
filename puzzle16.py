@@ -1,70 +1,150 @@
+from itertools import combinations
+
+import networkx as nx
+
+
 test = False
 
 
-class Valve:
-    def __init__(self, line):
-        valve_info, tunnels_info = line.split(';')
-        valve_tokens = valve_info.split()
-        self.name = valve_tokens[1]
-        self.flow_rate = int(valve_tokens[-1].split('=')[1])
-        self.neighbours = set(word[:-1] if word.endswith(',') else word for word in tunnels_info.split()[4:])
+def clip(x):
+    return x if x > 0 else 0
 
 
 def read_data():
     filename = f'puzzle16{"-test" if test else ""}.in'
     with open(filename, 'r') as f:
+        graph = nx.Graph()
         valves = {}
         for line in f:
-            valve = Valve(line)
-            valves[valve.name] = valve
-    return valves
+            valve_info, tunnels_info = line.split(';')
+            valve_tokens = valve_info.split()
+            name = valve_tokens[1]
+            flow_rate = int(valve_tokens[-1].split('=')[1])
+            neighbours = set(word[:-1] if word.endswith(',') else word for word in tunnels_info.split()[4:])
+            graph.add_edges_from([(name, neighbour) for neighbour in neighbours])
+            if flow_rate:
+                valves[name] = flow_rate
+    return graph, valves
 
 
-def find_path(valves, current, time, useful_valves, pressure=0, visited=tuple(), open_valves=None):
-    new_visited = (*visited, current)
-    if open_valves is None:
-        open_valves = set()
-    if time == 1:
-        return pressure, new_visited
-    if len(open_valves) == useful_valves:
-        return pressure + (time - 1) * sum(valves[v].flow_rate for v in open_valves), new_visited
-    visited_set = set(visited)
-    current_valve = valves[current]
-    new_time = time - 1
-    if visited:
-        last = visited[-1]
-        if last == current:
-            last = visited[-2]
-    else:
-        last = None
-    new_pressure = pressure + sum(valves[v].flow_rate for v in open_valves)
+def transform_graph(graph, valves, start):
+    distances = dict(nx.shortest_path_length(graph))
+    valve_graph = nx.Graph()
+    remaining_valves = set(valves)
+    for valve in valves:
+        valve_graph.add_edge(valve, start, weight=distances[valve][start])
+        remaining_valves.remove(valve)
+        for other_valve in valves:
+            if valve == other_valve:
+                continue
+            valve_graph.add_edge(valve, other_valve, weight=distances[valve][other_valve])
+    return valve_graph
 
-    best_pressure, best_path = -1, None
-    if current_valve.flow_rate > 0 and current not in open_valves:
-        # open current
-        candidate_pressure, path = find_path(valves, current=current, time=new_time, useful_valves=useful_valves,
-                                             pressure=new_pressure + current_valve.flow_rate, visited=new_visited,
-                                             open_valves={*open_valves, current})
-        if candidate_pressure > best_pressure:
-            best_pressure, best_path = candidate_pressure, path
-    first_candidates = current_valve.neighbours - visited_set
-    second_candidates = current_valve.neighbours & visited_set
-    # last_candidate = set()
-    if last in second_candidates:
-        second_candidates.remove(last)
-        # last_candidate.add(last)
-    candidates = (*first_candidates, *second_candidates)  # (*first_candidates, *second_candidates, *last_candidate)
-    if not candidates:
-        candidates = (last,)
-    for candidate in candidates:
-        candidate_pressure, path = find_path(valves, current=candidate, time=new_time, useful_valves=useful_valves,
-                                             pressure=new_pressure, visited=new_visited, open_valves=open_valves)
-        if candidate_pressure > best_pressure:
-            best_pressure, best_path = candidate_pressure, path
-    return best_pressure, best_path
+
+def find_path(graph, pressures, time, agents=1):
+    def _find_path(valves, remaining_time, pressure=0, start='AA'):
+        if not (remaining_time and valves):
+            return pressure
+
+        best = pressure
+        scored_valves = tuple(
+            sorted(
+                (
+                    (score, v)
+                    for v in valves
+                    if (score := pressures[v] * (remaining_time - graph[start][v]['weight'] - 1)) > 0
+                ),
+                reverse=True
+            )
+        )
+        valves = set(v for _, v in scored_valves)
+
+        for _, valve in scored_valves:
+            dist, valve_pressure = graph[start][valve]['weight'], pressures[valve]
+            new_time = remaining_time - dist - 1
+            new_pressure = pressure + new_time * valve_pressure
+            new_valves = valves - {valve}
+
+            next_steps = sorted(
+                (pressures[v] * (new_time - graph[valve][v]['weight'] - 1) for v in new_valves),
+                reverse=True
+            )
+            upper_bound = new_pressure + sum(next_steps[:new_time // 2])
+
+            if upper_bound <= best:
+                continue
+
+            candidate = _find_path(new_valves, new_time, new_pressure, start=valve)
+            if candidate > best:
+                best = candidate
+
+        return best
+
+    return _find_path(valves=set(pressures), remaining_time=time)
+
+
+def all_combinations(valves):
+    for n in range(1, len(valves) // 2 + 1):
+        combs = combinations(valves, n)
+        for comb in combs:
+            v1 = set(comb)
+            yield v1, valves - v1
+
+
+def find_path2(graph, pressures, time):
+    def _find_path(valves, remaining_time, pressure=0, start='AA'):
+        if not (remaining_time and valves):
+            return pressure
+
+        best = pressure
+        scored_valves = tuple(
+            sorted(
+                (
+                    (score, v)
+                    for v in valves
+                    if (score := pressures[v] * (remaining_time - graph[start][v]['weight'] - 1)) > 0
+                ),
+                reverse=True
+            )
+        )
+        valves = set(v for _, v in scored_valves)
+
+        for _, valve in scored_valves:
+            dist, valve_pressure = graph[start][valve]['weight'], pressures[valve]
+            new_time = remaining_time - dist - 1
+            new_pressure = pressure + new_time * valve_pressure
+            new_valves = valves - {valve}
+
+            next_steps = sorted(
+                (pressures[v] * (new_time - graph[valve][v]['weight'] - 1) for v in new_valves),
+                reverse=True
+            )
+            upper_bound = new_pressure + sum(next_steps[:new_time // 2])
+
+            if upper_bound <= best:
+                continue
+
+            candidate = _find_path(new_valves, new_time, new_pressure, start=valve)
+            if candidate > best:
+                best = candidate
+
+        return best
+
+    valves = set(pressures)
+    return max(
+        _find_path(valves1, time) + _find_path(valves2, time)
+        for valves1, valves2 in all_combinations(valves)
+    )
+
 
 
 def part_1():
-    valves = read_data()
-    useful_valves = sum(1 for valve in valves.values() if valve.flow_rate > 0)
-    return find_path(valves, current='AA', time=30, useful_valves=useful_valves)
+    graph, valves = read_data()
+    graph = transform_graph(graph, valves, start='AA')
+    return find_path(graph, pressures=valves, time=30)
+
+
+def part_2():
+    graph, valves = read_data()
+    graph = transform_graph(graph, valves, start='AA')
+    return find_path2(graph, pressures=valves, time=26)
