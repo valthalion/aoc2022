@@ -1,8 +1,10 @@
+from collections import deque
+
+
 test = False
 
-def read_data():
-    global moves_period
 
+def read_data():
     filename = f'puzzle17{"-test" if test else ""}.in'
     with open(filename, 'r') as f:
         line = next(f).strip()
@@ -11,83 +13,117 @@ def read_data():
 
 
 class Piece:
-    def __init__(self, position):
-        self.position = position
+    def __init__(self):
+        self.x = 2
+        self.y = 4
+        self.width = None
+        self.height = None
+        self.lines = None  # bottom up
+
+    def _slide(self, move):
+        self.x += move
+        if move > 0:
+            for idx in range(self.height):
+                self.lines[idx] >>= 1
+        else:
+            for idx in range(self.height):
+                self.lines[idx] <<= 1
 
     def move(self, move, shaft):
         self.slide(move, shaft)
         stopped = self.drop(shaft)
         return stopped
 
-    def blocks(self, position=None):
-        return self._blocks(position if position is not None else self.position)
-
-    def _blocks(self, position):
-        return NotImplementedError
-
-    def collision(self, position, shaft):
-        for x, y in self.blocks(position=position):
-            if not 0 <= x < 7:
+    def collision(self, shaft):
+        if self.y > 0:
+            return False
+        row = -self.y
+        for line in self.lines:
+            if line & shaft[row]:
                 return True
-            if (x, y) in shaft:
-                return True
+            row -= 1
+            if row < 0:
+                break
         return False
 
     def slide(self, move, shaft):
-        x, y = self.position
-        new_position = (x + move, y)
-        if not self.collision(new_position, shaft):
-            self.position = new_position
+        if 0 <= self.x + move <= 7 - self.width:  # slide is possible for
+            self._slide(move)
+            if self.collision(shaft):  # collision wiht a fallen rock
+                self._slide(-move)  # revert move
 
     def drop(self, shaft):
-        x, y = self.position
-        new_position = (x, y - 1)
-        if self.collision(new_position, shaft):
+        self.y -= 1
+        if self.collision(shaft):
+            self.y += 1
             return True
-        self.position = new_position
         return False
 
     def highest(self):
-        return max(y for _, y in self.blocks())
+        return self.y + self.height - 1
+
+    def blend_with(self, shaft):
+        row = -self.y
+        for line in self.lines:
+            shaft[row] |= line
+            row -= 1
 
 
 class HorLine(Piece):
-    def _blocks(self, position):
-        x, y = position
-        return set((x + dx, y) for dx in range(0, 4))
+    def __init__(self):
+        super().__init__()
+        self.width = 4
+        self.height = 1
+        self.lines = [0b0011110]
 
 
 class Plus(Piece):
-    def _blocks(self, position):
-        x, y = position
-        return {(x + 1, y), *((x + dx, y + 1) for dx in range(3)), (x + 1, y + 2)}
+    def __init__(self):
+        super().__init__()
+        self.width = 3
+        self.height = 3
+        self.lines = [0b0001000,
+                      0b0011100,
+                      0b0001000]
 
 
 class Ell(Piece):
-    def _blocks(self, position):
-        x, y = position
-        return {*((x + dx, y) for dx in range(3)), (x + 2, y + 1), (x + 2, y + 2)}
+    def __init__(self):
+        super().__init__()
+        self.width = 3
+        self.height = 3
+        self.lines = [0b0011100,
+                      0b0000100,
+                      0b0000100]
 
 
 class VerLine(Piece):
-    def _blocks(self, position):
-        x, y = position
-        return set((x, y + dy) for dy in range(4))
+    def __init__(self):
+        super().__init__()
+        self.width = 1
+        self.height = 4
+        self.lines = [0b0010000,
+                      0b0010000,
+                      0b0010000,
+                      0b0010000]
 
 
 class Square(Piece):
-    def _blocks(self, position):
-        x, y = position
-        return set((x + dx, y + dy) for dx in range(2) for dy in range(2))
+    def __init__(self):
+        super().__init__()
+        self.width = 2
+        self.height = 2
+        self.lines = [0b0011000,
+                      0b0011000]
 
 
 def piece_sequence():
     while True:
-        yield HorLine
-        yield Plus
-        yield Ell
-        yield VerLine
-        yield Square
+        yield HorLine()
+        yield Plus()
+        yield Ell()
+        yield VerLine()
+        yield Square()
 
 
 def repeat(it):
@@ -102,25 +138,35 @@ def move_sequence():
 
 
 def play_step(shaft, pieces, moves):
-    piece = next(pieces)(position=(2, 4))
+    piece = next(pieces)
     while True:
         move = next(moves)
         stopped = piece.move(move, shaft)
         if stopped:
-            shaft |= piece.blocks()
             piece_highest = piece.highest()
             if piece_highest > 0:
-                shaft = {(x, y - piece_highest) for (x, y) in shaft if y - piece_highest > -40}
-                return piece_highest, shaft
-            return 0, shaft
+                shaft.extendleft([0] * piece_highest)
+                piece.y -= piece_highest
+            piece.blend_with(shaft)
+            return max(0, piece_highest), shaft
 
 
-def shaft_hash(shaft, depth=15):
-    return tuple((x, -y) for y in range(depth) for x in range(7) if (x, -y) in shaft)
+def envelope(shaft):
+    current = 0
+    for line in shaft:
+        current |= line
+        if current == 0b1111111:
+            break
+        yield current
+
+
+def shaft_hash(shaft, depth=18):
+    # return tuple(shaft)[:depth]
+    return tuple(envelope(shaft))
 
 
 def play(rounds):
-    shaft = set((x, 0) for x in range(7))
+    shaft = deque([0b1111111], maxlen=40)
     highest = 0
     pieces = piece_sequence()
     moves_period, moves = move_sequence()
