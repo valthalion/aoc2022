@@ -1,5 +1,4 @@
-test = True
-
+test = False
 
 def read_data():
     global moves_period
