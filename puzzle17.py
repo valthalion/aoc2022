@@ -148,7 +148,7 @@ def play_step(shaft, pieces, moves):
                 shaft.extendleft([0] * piece_highest)
                 piece.y -= piece_highest
             piece.blend_with(shaft)
-            return max(0, piece_highest), shaft
+            return max(0, piece_highest)
 
 
 def envelope(shaft):
@@ -160,9 +160,9 @@ def envelope(shaft):
         yield current
 
 
-def shaft_hash(shaft, depth=18):
-    # return tuple(shaft)[:depth]
-    return tuple(envelope(shaft))
+def shaft_hash(shaft, depth=17):
+    return tuple(shaft)[:depth]
+    # return tuple(envelope(shaft))
 
 
 def play(rounds):
@@ -178,7 +178,7 @@ def play(rounds):
 
     while iteration < rounds:
         iteration += 1
-        delta, shaft = play_step(shaft, pieces, moves)
+        delta = play_step(shaft, pieces, moves)
         highest += delta
         height_cache[iteration] = highest
         new_shaft = (iteration % 5, iteration % moves_period, shaft_hash(shaft))
@@ -190,9 +190,15 @@ def play(rounds):
             cycle_height = highest - height_cache[cycle_start]
             iterations_left = rounds - iteration
             cycles, iterations_left = divmod(iterations_left, cycle_length)
-            height_left = height_cache[cycle_start + iterations_left] - height_cache[cycle_start]
-            return highest + cycles * cycle_height + height_left
+            highest += cycles * cycle_height
+            break
         cache[new_shaft] = iteration
+    else:  # no break -> reached iterations without finding a cycle
+        return highest
+
+    for _ in range(iterations_left):
+        highest += play_step(shaft, pieces, moves)
+
     return highest
 
 
