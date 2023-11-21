@@ -133,8 +133,7 @@ def repeat(it):
 
 def move_sequence():
     moveseq = read_data()
-    moves_period = len(moveseq)
-    return moves_period, repeat(moveseq)
+    return len(moveseq), repeat(moveseq)
 
 
 def play_step(shaft, pieces, moves):
@@ -151,18 +150,8 @@ def play_step(shaft, pieces, moves):
             return max(0, piece_highest)
 
 
-def envelope(shaft):
-    current = 0
-    for line in shaft:
-        current |= line
-        if current == 0b1111111:
-            break
-        yield current
-
-
 def shaft_hash(shaft, depth=17):
     return tuple(shaft)[:depth]
-    # return tuple(envelope(shaft))
 
 
 def play(rounds):
